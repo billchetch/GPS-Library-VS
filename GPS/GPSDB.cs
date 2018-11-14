@@ -7,6 +7,7 @@ using System.Globalization;
 
 namespace GPS
 {
+    //specific database for recording gps data
     public class GPSDB : Database.DB
     {
         const String STATUS_FILTER = "data_name='gps_device_status'";
