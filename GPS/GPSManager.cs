@@ -4,7 +4,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace GPS
+namespace Chetch.GPS
 {
     //class for managing GPS
     public class GPSManager

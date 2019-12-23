@@ -5,7 +5,7 @@ using System.Text;
 using System.Threading.Tasks;
 using System.Globalization;
 
-namespace GPS
+namespace Chetch.GPS
 {
     //specific database for recording gps data.
     public class GPSDB : Database.DB
