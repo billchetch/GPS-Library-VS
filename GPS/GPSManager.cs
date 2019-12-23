@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 
 namespace GPS
 {
+    //class for managing GPS
     public class GPSManager
     {
         private GPSSerialDevice device;
