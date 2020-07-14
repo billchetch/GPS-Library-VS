@@ -4,35 +4,53 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using System.Globalization;
+using Chetch.Database;
 
 namespace Chetch.GPS
 {
     //specific database for recording gps data.
-    public class GPSDB : Database.DB
+    public class GPSDB : Chetch.Database.DB
     {
-        const String STATUS_FILTER = "data_name='gps_device_status'";
-        
-        private bool overwritePositionData = false;
-        private bool overwriteSatelliteData = false;
-
-        public GPSDB(String server, String db, String username, String password) : base(server, db, username, password)
+        public class SysInfo : DBRow
         {
-            this.AddInsertStatement("gps_positions", "latitude={0},longitude={1},accuracy={2},sentence_type='{3}'");
-            this.AddSelectStatement("gps_positions", "*", null, null);
-            this.AddDeleteStatement("gps_positions", "updated IS NOT NULL", null, null); //delete all
-            this.AddDeleteStatement("first_gps_position", "gps_positions", null, "updated ASC", "1"); //delect most ancient recorded position (for queue structure to table)
+            public DateTime Updated { get; internal set; }
+            
+            override public void AddField(String fieldName, Object fieldValue)
+            {
+                base.AddField(fieldName, fieldValue);
 
-            this.AddInsertStatement("gps_device_status", "sys_info", "data_name='gps_device_status', data_value='{0}'");
-            this.AddUpdateStatement("gps_device_status", "sys_info", "data_value='{0}', updated=NOW()", STATUS_FILTER);
+                switch (fieldName)
+                {
+                    case "updated":
+                        //TODO: parse in to date object
+                        break;
+                }
+            }
+        }
 
-            this.AddInsertStatement("gps_satellites", "sv_count={0},prn={1},elevation={2},azimuth={3},snr={4}");
-            this.AddSelectStatement("gps_satellites", "*", null, null);
-            this.AddDeleteStatement("gps_satellites", "updated IS NOT NULL", null, null);
-            this.AddDeleteStatement("first_gps_satellite", "gps_satellites", null, "updated ASC", "1"); //delect most ancient recorded position (for queue structure to table)
+        const String STATUS_FILTER = "data_name='gps_device_status'";
+
+        static public GPSDB Create(System.Configuration.ApplicationSettingsBase settings)
+        {
+            GPSDB db = DB.Create<GPSDB>(settings);
+            return db;
+        }
+
+        override public void Initialize()
+        {
+            AddSelectStatement("gps_positions", null, null, "updated DESC", "250"); 
+            
+            AddInsertStatement("gps_positions", "latitude={0},longitude={1},accuracy={2}");
+            AddInsertStatement("gps_device_status", "sys_info", STATUS_FILTER + ", data_value='{0}'");
+            
+            AddUpdateStatement("gps_device_status", "sys_info", "data_value='{0}'", STATUS_FILTER);
+            
+            base.Initialize();
         }
 
         public void SaveStatus(String status, String statusMessage)
         {
+            
             String statusData = "{\"status\": \"" + status + "\", \"message\": \"" + statusMessage + "\"}";
             
             if (Count("sys_info", STATUS_FILTER) == 0)
@@ -49,40 +67,32 @@ namespace Chetch.GPS
             SaveStatus(status, "");
         }
 
-        public void EmptyPositionsTable()
+        public List<DBRow> GetLatestPositions()
         {
-            Delete("gps_positions");
+            return Select("gps_positions", null, null);
         }
+        
 
-        public void AddPositionData(double latitude, double longitude, double accuracy, String sentenceType)
-        {
-            if (!overwritePositionData && Count("gps_positions") >= 10)
-            {
-                overwritePositionData = true;
-            }
-            if (overwritePositionData)
-            {
-                Delete("first_gps_position");
-            }
-            Insert("gps_positions", latitude.ToString(CultureInfo.InvariantCulture), longitude.ToString(CultureInfo.InvariantCulture), accuracy.ToString(CultureInfo.InvariantCulture), sentenceType);
-        }
 
-        public void EmptySatellitesTable()
+        public long WritePosition(GPSManager.GPSPositionData pos)
         {
-            Delete("gps_satellites");
-        }
-
-        public void SaveSatelliteData(int svsInView, int prn, int elevation, int azimuth, int snr)
-        {
-            if (!overwriteSatelliteData && Count("gps_satellites") >= 10)
+            DBRow row = new DBRow();
+            row.AddField("latitude", pos.Latitude);
+            row.AddField("longitude", pos.Longitude);
+            row.AddField("hdop", pos.HDOP);
+            row.AddField("vdop", pos.VDOP);
+            row.AddField("pdop", pos.PDOP);
+            row.AddField("bearing", pos.Bearing);
+            row.AddField("speed", pos.Speed);
+            if(pos.DBID == 0)
             {
-                overwriteSatelliteData = true;
-            }
-            if (overwriteSatelliteData)
+                pos.DBID = Insert("gps_positions", row);
+                return pos.DBID;
+            } else
             {
-                Delete("first_gps_satellite");
+                Update("gps_positions", row, pos.DBID);
+                return pos.DBID;
             }
-            Insert("gps_satellites", svsInView.ToString(CultureInfo.InvariantCulture), prn.ToString(CultureInfo.InvariantCulture), elevation.ToString(CultureInfo.InvariantCulture), azimuth.ToString(CultureInfo.InvariantCulture), snr.ToString(CultureInfo.InvariantCulture));
         }
     }
 }

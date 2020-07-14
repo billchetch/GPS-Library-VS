@@ -3,29 +3,96 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using System.Diagnostics;
+using System.Device.Location;
+using Chetch.Utilities;
 
 namespace Chetch.GPS
 {
     //class for managing GPS
     public class GPSManager
     {
+        const int MAX_POSITIONS = 10; //maximum number of data in positions list
+        public TraceSource Tracing { get; set; } = null;
+
+        public class GPSPositionData
+        {
+
+            public long DBID = 0;
+            public double Latitude = 0;
+            public double Longitude = 0;
+            public double HDOP = 0;
+            public double VDOP = 0;
+            public double PDOP = 0;
+            public double Speed = 0;
+            public double Bearing = 0; //in degrees
+            String SentenceType = null;
+            public long Timestamp = 0; //UTC in millis
+
+            public GPSPositionData()
+            {
+            }
+
+            public GPSPositionData(double latitude, double longitude, double hdop, double vdop, double pdop, String sentenceType)
+            {
+                Latitude = latitude;
+                Longitude = longitude;
+                HDOP = hdop;
+                VDOP = vdop;
+                PDOP = pdop;
+                SentenceType = sentenceType;
+                Timestamp = DateTime.UtcNow.Ticks / TimeSpan.TicksPerMillisecond;
+            }
+
+            public void SetMotionData(GPSPositionData previousPos)
+            {
+                double elapsed = (double)(Timestamp - previousPos.Timestamp) / 1000.0;
+                if (elapsed <= 0) throw new Exception("Bad timestamp diference");
+
+                //cacculate speed
+                double distance = Measurement.GetDistance(Latitude, Longitude, previousPos.Latitude, previousPos.Longitude);
+                Speed = distance / elapsed;
+                Bearing = Measurement.GetFinalBearing(previousPos.Latitude, previousPos.Longitude, Latitude, Longitude);
+            }
+        }
+
+        //TODO: record satellite data
+        public class GPSSatelliteData
+        {
+            public GPSSatelliteData()
+            {
+
+            }
+        }
+
+        private List<GPSPositionData> positions = new List<GPSPositionData>();
+        private GPSPositionData currentPosition = null;
+        private List<GPSSatelliteData> satellites = new List<GPSSatelliteData>();
+        private long processPositionWait = 500; //in millis
+
         private GPSSerialDevice device;
         private GPSDB db;
         private NMEAInterpreter nmea;
         private long sentenceLastReceived = -1;
         private String lastSentenceReceived;
-        private double currentDOP;
-        private long positionLastSaved;
-        private int savePositionWait = 5;
-        private long satelliteLastSaved;
-        private int saveSatelliteWait = 5;
+        private double currentHDOP;
+        private double currentVDOP;
+        private double currentPDOP;
+
+        private long positionLastProcessed;
+        private long positionLastLogged;
+        private int logPositionWait = 30*1000; //in millis
         
-        public GPSManager(String deviceDescription, String server, String database, String username, String password)
+        public GPSManager(String deviceDescription, GPSDB db)
         {
             device = new GPSSerialDevice(deviceDescription);
-            db = new GPSDB(server, database, username, password);
+            this.db = db;
             nmea = new NMEAInterpreter();
             nmea.HDOPReceived += OnHDOPReceived;
+            nmea.VDOPReceived += OnVDOPReceived;
+            nmea.PDOPReceived += OnPDOPReceived;
+            nmea.SpeedReceived += OnSpeedReceived;
+            nmea.BearingReceived += OnBearingReceived;
             nmea.PositionReceived += OnPositionReceived;
             nmea.SatellitesReceived += OnSatellitesReceived;
             device.NewSentenceReceived += OnNewSentenceReceived;
@@ -37,16 +104,17 @@ namespace Chetch.GPS
         {
             try
             {
-
-                db.SaveStatus("ready");
-                db.EmptyPositionsTable();
-                db.EmptySatellitesTable();
+                Tracing?.TraceEvent(TraceEventType.Information, 0, "Device ready");
+                db?.SaveStatus("ready");
                 sentenceLastReceived = -1;
+                Tracing?.TraceEvent(TraceEventType.Information, 0, "Start listening for GPS data...");
                 device.StartListening();
-                db.SaveStatus("recording");
+                db?.SaveStatus("recording");
+                Tracing?.TraceEvent(TraceEventType.Information, 0, "Started recording GPS data");
             } catch (Exception ex)
             {
-                db.SaveStatus("error", ex.Message);
+                db?.SaveStatus("error", ex.Message);
+                Tracing?.TraceEvent(TraceEventType.Error, 0, "GPSManager.StartRecording: " + ex.Message);
                 throw ex;
             }
         }
@@ -56,7 +124,8 @@ namespace Chetch.GPS
             sentenceLastReceived = -1;
             lastSentenceReceived = null;
             device.StopListening();
-            db.SaveStatus("ready");
+            Tracing?.TraceEvent(TraceEventType.Information, 0, "Stopped recording GPS data");
+            db?.SaveStatus("ready");
         }
 
         public void OnNewSentenceReceived(String sentence)
@@ -89,36 +158,117 @@ namespace Chetch.GPS
 
         private void OnHDOPReceived(double value)
         {
-            // Remember the current HDOP value
-            currentDOP = value;
+            currentHDOP = value;
+        }
+
+        private void OnVDOPReceived(double value)
+        {
+            currentVDOP = value;
+        }
+
+        private void OnPDOPReceived(double value)
+        {
+            currentPDOP = value;
+        }
+
+        private void OnBearingReceived(double value)
+        {
+
+        }
+
+        private void OnSpeedReceived(double value)
+        {
+
         }
 
         private void OnPositionReceived(double latitude, double longitude)
         {
-            long milliseconds = DateTime.Now.Ticks / TimeSpan.TicksPerMillisecond;
-            if (positionLastSaved == 0 || (milliseconds - positionLastSaved > savePositionWait * 1000))
+            long now = DateTime.Now.Ticks / TimeSpan.TicksPerMillisecond;
+            long elapsed = currentPosition == null ? processPositionWait : now - positionLastProcessed;
+            if (currentHDOP > 10.0 * ((double)elapsed / (double)processPositionWait)) return;
+
+            GPSPositionData pos = new GPSPositionData(latitude, longitude, currentHDOP, currentVDOP, currentPDOP, nmea.LastSentenceType);
+            if (positions.Count > MAX_POSITIONS)
             {
-                positionLastSaved = milliseconds;
-                db.AddPositionData(latitude, longitude, currentDOP, nmea.LastSentenceType);
+                positions.RemoveAt(0);
+            }
+            positions.Insert(0, pos);
+            if (positions.Count < MAX_POSITIONS) return;
+
+            GPSPositionData newPos = new GPSPositionData();
+            foreach(GPSPositionData pd in positions)
+            {
+                newPos.Latitude += pd.Latitude;
+                newPos.Longitude += pd.Longitude;
+                newPos.HDOP += pd.HDOP;
+                newPos.VDOP += pd.VDOP;
+                newPos.PDOP += pd.PDOP;
+                newPos.Timestamp += pd.Timestamp;
             }
 
+            newPos.Latitude /= positions.Count;
+            newPos.Longitude /= positions.Count;
+            newPos.HDOP /= positions.Count;
+            newPos.VDOP /= positions.Count;
+            newPos.PDOP /= positions.Count;
+            newPos.Timestamp /= positions.Count;
+
+            if (currentPosition != null)
+            {
+                try
+                {
+                    newPos.SetMotionData(currentPosition);
+                    if (now - positionLastLogged > logPositionWait)
+                    {
+                        //add this as a new value
+                        db?.WritePosition(newPos);
+                        positionLastLogged = now;
+                    }
+                    else
+                    {
+                        //just update the same value in the database
+                        newPos.DBID = currentPosition.DBID;
+                        db?.WritePosition(newPos);
+                    }
+                    positionLastProcessed = now;
+                    currentPosition = newPos;
+                }
+                catch (Exception e)
+                {
+                    Tracing?.TraceEvent(TraceEventType.Error, 0, "OnPositionReceived: {0}", e.Message);
+                }
+            }
+            else
+            {
+                try
+                {
+                    db?.WritePosition(newPos);
+                    currentPosition = newPos;
+                    positionLastProcessed = now;
+                    positionLastLogged = now;
+                }
+                catch (Exception e)
+                {
+                    Tracing?.TraceEvent(TraceEventType.Error, 0, "OnPositionReceived: {0}", e.Message);
+                }
+            }
         }
 
         private void OnSatellitesReceived(int svsInView, int[][] satellites)
         {
-            long milliseconds = DateTime.Now.Ticks / TimeSpan.TicksPerMillisecond;
-            if (satelliteLastSaved == 0 || (milliseconds - satelliteLastSaved > saveSatelliteWait * 1000))
+            if(satellites.Length > 0)
             {
-                satelliteLastSaved = milliseconds;
-                for (int i = 0; i < satellites.Length; i++)
-                {
-                    int[] satellite = satellites[i];
-                    if (satellite != null && satellite.Length == 4)
-                    {
-                        db.SaveSatelliteData(svsInView, satellite[0], satellite[1], satellite[2], satellite[3]);
-                    }
-                } //end looping through satellites
+                this.satellites.Clear();
             }
+            for (int i = 0; i < satellites.Length; i++)
+            {
+                int[] satellite = satellites[i];
+                if (satellite != null && satellite.Length == 4)
+                {
+                    //db.SaveSatelliteData(svsInView, satellite[0], satellite[1], satellite[2], satellite[3]);
+                    //this.satellites.Add(new GPSSatelliteData(svsInView, satellite));
+                }
+            } //end looping through satellites
         }
     }
 }

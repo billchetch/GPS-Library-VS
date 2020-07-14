@@ -9,6 +9,9 @@ namespace Chetch.GPS
 {
     public class GPSSerialDevice : IDisposable
     {
+        public const String GPS_GNSS_GENERIC = "GPS/GNSS";
+        public const String UBLOX_7_GPS = "u-blox 7 GPS";
+
         public delegate void NewSentenceReceivedEventHandler(String sentence);
 
         public event NewSentenceReceivedEventHandler NewSentenceReceived;
