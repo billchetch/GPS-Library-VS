@@ -58,7 +58,25 @@ namespace Chetch.GPS
 
         public Boolean IsListening
         {
-            get { return serialPort != null && serialPort.IsOpen; }
+            get {
+                if(serialPort == null) return false;
+                if (!serialPort.IsOpen) return false;
+
+                String p = getPortNameFromDescription(deviceDescription);
+                return p != null;
+            }
+        }
+
+        private String getPortNameFromDescription(String description)
+        {
+            List<String> gpsPorts = Utilities.SerialPorts.Find(description);
+            if(gpsPorts.Count == 1)
+            {
+                return gpsPorts[0];
+            } else
+            {
+                return null;
+            }
         }
 
         public void StartListening()
@@ -66,17 +84,8 @@ namespace Chetch.GPS
             // Closing serial port if it is open
             if (serialPort != null && serialPort.IsOpen)
                 serialPort.Close();
-
-
-            // Setting serial port settings
-            List<String> gpsPorts = Utilities.SerialPorts.Find(deviceDescription);
-
-            if (gpsPorts.Count != 1)
-            {
-                throw new Exception("No device found for " + deviceDescription);
-            }
-
-            portName = gpsPorts[0];
+            
+            portName = getPortNameFromDescription(deviceDescription);
             if (portName != null)
             {
                 serialPort = new SerialPort(portName, baudRate, parity, dataBits, stopBits);

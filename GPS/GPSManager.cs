@@ -54,6 +54,11 @@ namespace Chetch.GPS
                 Speed = distance / elapsed;
                 Bearing = Measurement.GetFinalBearing(previousPos.Latitude, previousPos.Longitude, Latitude, Longitude);
             }
+
+            public override string ToString()
+            {
+                return String.Format("Lat/Lon: {0},{1}, Heading: {2}deg @ {3}mps", Latitude, Longitude, Bearing, Speed);
+            }
         }
 
         //TODO: record satellite data
@@ -65,8 +70,28 @@ namespace Chetch.GPS
             }
         }
 
+        public enum State
+        {
+            NOT_CONNECTED,
+            CONNECTED,
+            RECORDING,
+            ERROR
+        }
+
+        public State CurrentState { get; set; } = State.NOT_CONNECTED;
+        public bool IsConnected {
+            get {
+                if (!device.IsListening)
+                {
+                    CurrentState = State.NOT_CONNECTED;
+                }
+                return (CurrentState == State.CONNECTED || CurrentState == State.RECORDING);
+            }
+        }
+
         private List<GPSPositionData> positions = new List<GPSPositionData>();
         private GPSPositionData currentPosition = null;
+        public GPSPositionData CurrentPosition {  get { return currentPosition; } }
         private List<GPSSatelliteData> satellites = new List<GPSSatelliteData>();
         private long processPositionWait = 500; //in millis
 
@@ -105,16 +130,19 @@ namespace Chetch.GPS
             try
             {
                 Tracing?.TraceEvent(TraceEventType.Information, 0, "Device ready");
-                db?.SaveStatus("ready");
+                db?.SaveStatus("not connected");
+                CurrentState = State.NOT_CONNECTED;
                 sentenceLastReceived = -1;
                 Tracing?.TraceEvent(TraceEventType.Information, 0, "Start listening for GPS data...");
                 device.StartListening();
-                db?.SaveStatus("recording");
-                Tracing?.TraceEvent(TraceEventType.Information, 0, "Started recording GPS data");
+                db?.SaveStatus("connected");
+                CurrentState = State.CONNECTED;
+                Tracing?.TraceEvent(TraceEventType.Information, 0, "Started listening to GPS data");
             } catch (Exception ex)
             {
                 db?.SaveStatus("error", ex.Message);
                 Tracing?.TraceEvent(TraceEventType.Error, 0, "GPSManager.StartRecording: " + ex.Message);
+                CurrentState = State.ERROR;
                 throw ex;
             }
         }
@@ -125,7 +153,8 @@ namespace Chetch.GPS
             lastSentenceReceived = null;
             device.StopListening();
             Tracing?.TraceEvent(TraceEventType.Information, 0, "Stopped recording GPS data");
-            db?.SaveStatus("ready");
+            db?.SaveStatus("not connected");
+            CurrentState = State.NOT_CONNECTED;
         }
 
         public void OnNewSentenceReceived(String sentence)
@@ -195,6 +224,12 @@ namespace Chetch.GPS
             positions.Insert(0, pos);
             if (positions.Count < MAX_POSITIONS) return;
 
+            if (CurrentState == State.CONNECTED)
+            {
+                CurrentState = State.RECORDING;
+                db?.SaveStatus("recording");
+                Tracing?.TraceEvent(TraceEventType.Information, 0, "Started recording");
+            }
             GPSPositionData newPos = new GPSPositionData();
             foreach(GPSPositionData pd in positions)
             {
