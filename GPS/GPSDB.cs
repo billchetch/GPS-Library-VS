@@ -11,6 +11,20 @@ namespace Chetch.GPS
     //specific database for recording gps data.
     public class GPSDB : Chetch.Database.DB
     {
+        public class GPSPositionRow : DBRow
+        {
+            protected override string GenerateParamString(KeyValuePair<string, object> kv)
+            {
+                switch (kv.Key)
+                {
+                    case "timestamp":
+                        return String.Format("{0}=FROM_UNIXTIME({1})", kv.Key, kv.Value);
+
+                    default:
+                        return base.GenerateParamString(kv);
+                }
+            }
+        }
         
         static public GPSDB Create(System.Configuration.ApplicationSettingsBase settings)
         {
@@ -52,7 +66,7 @@ namespace Chetch.GPS
         
         public long WritePosition(GPSManager.GPSPositionData pos)
         {
-            DBRow row = new DBRow();
+            GPSPositionRow row = new GPSPositionRow();
             row.AddField("latitude", pos.Latitude);
             row.AddField("longitude", pos.Longitude);
             row.AddField("hdop", pos.HDOP);
@@ -60,15 +74,9 @@ namespace Chetch.GPS
             row.AddField("pdop", pos.PDOP);
             row.AddField("bearing", pos.Bearing);
             row.AddField("speed", pos.Speed);
-            if(pos.DBID == 0)
-            {
-                pos.DBID = Insert("gps_positions", row);
-                return pos.DBID;
-            } else
-            {
-                Update("gps_positions", row, pos.DBID);
-                return pos.DBID;
-            }
+            row.AddField("timestamp", pos.Timestamp);
+
+            return Write("gps_positions", row);
         }
     }
 }

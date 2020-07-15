@@ -12,7 +12,7 @@ namespace Chetch.GPS
     //class for managing GPS
     public class GPSManager
     {
-        const int MAX_POSITIONS = 10; //maximum number of data in positions list
+        const int MAX_POSITIONS = 5; //maximum number of data in positions list
         public TraceSource Tracing { get; set; } = null;
 
         public class GPSPositionData
@@ -57,7 +57,8 @@ namespace Chetch.GPS
 
             public override string ToString()
             {
-                return String.Format("Lat/Lon: {0},{1}, Heading: {2}deg @ {3}mps", Latitude, Longitude, Bearing, Speed);
+                String dt = (new DateTime(Timestamp * TimeSpan.TicksPerMillisecond)).ToString("yyyy-MM-dd HH:mm:ss");
+                return String.Format("{0} Lat/Lon: {1},{2}, Heading: {3}deg @ {4}mps", dt, Latitude, Longitude, Bearing, Speed);
             }
         }
 
@@ -90,10 +91,11 @@ namespace Chetch.GPS
         }
 
         private List<GPSPositionData> positions = new List<GPSPositionData>();
+        public List<GPSPositionData> Positions { get {  return positions;  } }
         private GPSPositionData currentPosition = null;
         public GPSPositionData CurrentPosition {  get { return currentPosition; } }
         private List<GPSSatelliteData> satellites = new List<GPSSatelliteData>();
-        private long processPositionWait = 500; //in millis
+        private long processPositionWait = 250; //in millis
 
         private GPSSerialDevice device;
         private GPSDB db;
@@ -129,7 +131,6 @@ namespace Chetch.GPS
         {
             try
             {
-                Tracing?.TraceEvent(TraceEventType.Information, 0, "Device ready");
                 db?.SaveStatus("not connected");
                 CurrentState = State.NOT_CONNECTED;
                 sentenceLastReceived = -1;
@@ -214,14 +215,14 @@ namespace Chetch.GPS
         {
             long now = DateTime.Now.Ticks / TimeSpan.TicksPerMillisecond;
             long elapsed = currentPosition == null ? processPositionWait : now - positionLastProcessed;
-            if (currentHDOP > 10.0 * ((double)elapsed / (double)processPositionWait)) return;
+            if (currentPDOP > 10.0 * ((double)elapsed / (double)processPositionWait)) return;
 
             GPSPositionData pos = new GPSPositionData(latitude, longitude, currentHDOP, currentVDOP, currentPDOP, nmea.LastSentenceType);
-            if (positions.Count > MAX_POSITIONS)
+            if (positions.Count >= MAX_POSITIONS)
             {
                 positions.RemoveAt(0);
             }
-            positions.Insert(0, pos);
+            positions.Add(pos);
             if (positions.Count < MAX_POSITIONS) return;
 
             if (CurrentState == State.CONNECTED)
