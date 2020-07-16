@@ -27,7 +27,7 @@ namespace Chetch.GPS
             public double Speed = 0;
             public double Bearing = 0; //in degrees
             String SentenceType = null;
-            public long Timestamp = 0; //UTC in millis
+            public long Timestamp = 0; //in millis
 
             public GPSPositionData()
             {
@@ -41,7 +41,7 @@ namespace Chetch.GPS
                 VDOP = vdop;
                 PDOP = pdop;
                 SentenceType = sentenceType;
-                Timestamp = DateTime.UtcNow.Ticks / TimeSpan.TicksPerMillisecond;
+                Timestamp = DateTime.Now.Ticks / TimeSpan.TicksPerMillisecond;
             }
 
             public void SetMotionData(GPSPositionData previousPos)
@@ -57,7 +57,7 @@ namespace Chetch.GPS
 
             public override string ToString()
             {
-                String dt = (new DateTime(Timestamp * TimeSpan.TicksPerMillisecond)).ToString("yyyy-MM-dd HH:mm:ss");
+                String dt = (new DateTime(Timestamp * TimeSpan.TicksPerMillisecond)).ToUniversalTime().ToString("yyyy-MM-dd HH:mm:ss UTC");
                 return String.Format("{0} Lat/Lon: {1},{2}, Heading: {3}deg @ {4}mps", dt, Latitude, Longitude, Bearing, Speed);
             }
         }

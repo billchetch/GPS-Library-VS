@@ -11,32 +11,82 @@ namespace Chetch.GPS
     //specific database for recording gps data.
     public class GPSDB : Chetch.Database.DB
     {
-        public class GPSPositionRow : DBRow
-        {
-            protected override string GenerateParamString(KeyValuePair<string, object> kv)
-            {
-                switch (kv.Key)
-                {
-                    case "timestamp":
-                        return String.Format("{0}=FROM_UNIXTIME({1})", kv.Key, kv.Value);
-
-                    default:
-                        return base.GenerateParamString(kv);
-                }
-            }
-        }
-        
         static public GPSDB Create(System.Configuration.ApplicationSettingsBase settings)
         {
             GPSDB db = DB.Create<GPSDB>(settings);
             return db;
         }
 
+        public class GPSPositionRow : DBRow
+        {
+            public override void AddField(string fieldName, object fieldValue)
+            {
+                switch (fieldName)
+                {
+                    case "timestamp":
+                        if (fieldValue is DateTime)
+                        {
+                            this[fieldName] = (long)(((DateTime)fieldValue).ToLocalTime().Ticks / TimeSpan.TicksPerMillisecond);
+                        } else if(fieldValue is long)
+                        {
+                            this[fieldName] = fieldValue;
+                        } else
+                        {
+                            throw new Exception("Unrecognised fieldValue type for timestamp");
+                        }
+
+                        break;
+
+                    default:
+                        base.AddField(fieldName, fieldValue);
+                        break;
+                }
+            }
+
+            protected override string GenerateParamString(KeyValuePair<string, object> kv)
+            {
+                switch (kv.Key)
+                {
+                    case "timestamp":
+                        return String.Format("timestamp='{0}'", DB.asString(new DateTime((long)kv.Value * TimeSpan.TicksPerMillisecond)));
+                        
+                    default:
+                        return base.GenerateParamString(kv);
+                }
+            }
+
+            public void Read(GPSManager.GPSPositionData pos)
+            {
+                ID = pos.DBID;
+                AddField("latitude", pos.Latitude);
+                AddField("longitude", pos.Longitude);
+                AddField("hdop", pos.HDOP);
+                AddField("vdop", pos.VDOP);
+                AddField("pdop", pos.PDOP);
+                AddField("bearing", pos.Bearing);
+                AddField("speed", pos.Speed);
+                AddField("timestamp", pos.Timestamp);
+            }
+
+            public void Assign(GPSManager.GPSPositionData pos)
+            {
+                pos.DBID = this.ID;
+                pos.Latitude = System.Convert.ToDouble(this["latitude"]);
+                pos.Longitude = System.Convert.ToDouble(this["longitude"]);
+                pos.Bearing = System.Convert.ToDouble(this["bearing"]);
+                pos.Speed = System.Convert.ToDouble(this["speed"]);
+                pos.HDOP = System.Convert.ToDouble(this["hdop"]);
+                pos.VDOP = System.Convert.ToDouble(this["vdop"]);
+                pos.PDOP = System.Convert.ToDouble(this["pdop"]);
+                pos.Timestamp = (long)this["timestamp"];
+            }
+        }
+        
         override public void Initialize()
         {
-            AddSelectStatement("gps_positions", null, null, "updated DESC", "250"); 
-            
-            
+            AddSelectStatement("gps_positions", null, null, "timestamp DESC", "250");
+            AddSelectStatement("gps_nearest_position", "*,abs(time_to_sec(timediff('{0}', timestamp))) as secs_diff", "gps_positions", null, "secs_diff, timestamp DESC", "250");
+
             base.Initialize();
         }
 
@@ -54,29 +104,30 @@ namespace Chetch.GPS
             SaveSysInfo(si);
         }
         
-        public List<DBRow> GetLatestPositions()
+        public List<GPSPositionRow> GetLatestPositions()
         {
-            return Select("gps_positions", null, null);
+            return Select<GPSPositionRow>("gps_positions", null, null);
         }
 
-        public DBRow GetPosition(String dateTime)
+        public GPSPositionRow GetLatestPosition()
         {
-            return null;
+            GPSPositionRow row = SelectRow<GPSPositionRow>("gps_positions", null, null);
+            return row;
+        }
+
+        public GPSPositionRow GetNearestPosition(String dateTime)
+        {
+            GPSPositionRow row = SelectRow<GPSPositionRow>("gps_nearest_position", "*", dateTime);
+            return row;
         }
         
         public long WritePosition(GPSManager.GPSPositionData pos)
         {
             GPSPositionRow row = new GPSPositionRow();
-            row.AddField("latitude", pos.Latitude);
-            row.AddField("longitude", pos.Longitude);
-            row.AddField("hdop", pos.HDOP);
-            row.AddField("vdop", pos.VDOP);
-            row.AddField("pdop", pos.PDOP);
-            row.AddField("bearing", pos.Bearing);
-            row.AddField("speed", pos.Speed);
-            row.AddField("timestamp", pos.Timestamp);
+            row.Read(pos);
 
-            return Write("gps_positions", row);
+            pos.DBID = Write("gps_positions", row);
+            return pos.DBID;
         }
     }
 }
