@@ -12,7 +12,6 @@ namespace Chetch.GPS
     //class for managing GPS
     public class GPSManager
     {
-        const int MAX_POSITIONS = 5; //maximum number of data in positions list
         public TraceSource Tracing { get; set; } = null;
 
         public class GPSPositionData
@@ -47,7 +46,7 @@ namespace Chetch.GPS
             public void SetMotionData(GPSPositionData previousPos)
             {
                 double elapsed = (double)(Timestamp - previousPos.Timestamp) / 1000.0;
-                if (elapsed <= 0) throw new Exception("Bad timestamp diference");
+                if (elapsed <= 0) throw new Exception("Bad timestamp diference " + elapsed + "ms");
 
                 //cacculate speed
                 double distance = Measurement.GetDistance(Latitude, Longitude, previousPos.Latitude, previousPos.Longitude);
@@ -91,12 +90,17 @@ namespace Chetch.GPS
         }
 
         private List<GPSPositionData> positions = new List<GPSPositionData>();
+        private Dictionary<String, GPSPositionData> positionsToAverage = new Dictionary<string, GPSPositionData>();
+        public int MaxPositions { get; set; } = 60; //determins maximum number of positions to avoid growing to infinity
+        public int MinDistance { get; set; } = 50; //in meteres the minimum required distance to travel in order to establish motion data
         public List<GPSPositionData> Positions { get {  return positions;  } }
         private GPSPositionData currentPosition = null;
         public GPSPositionData CurrentPosition {  get { return currentPosition; } }
-        private List<GPSSatelliteData> satellites = new List<GPSSatelliteData>();
-        private long processPositionWait = 250; //in millis
+        private GPSPositionData previousPosition = null;
+        public GPSPositionData PreviousPosition { get { return previousPosition; } }
 
+        private List<GPSSatelliteData> satellites = new List<GPSSatelliteData>();
+        
         private GPSSerialDevice device;
         private GPSDB db;
         private NMEAInterpreter nmea;
@@ -106,9 +110,9 @@ namespace Chetch.GPS
         private double currentVDOP;
         private double currentPDOP;
 
-        private long positionLastProcessed;
-        private long positionLastLogged;
-        private int logPositionWait = 30*1000; //in millis
+        private long positionLastProcessed = 0;
+        private long positionLastLogged = 0;
+        public int LogPositionWait { get; set; } = 30 * 1000; //in millis
         
         public GPSManager(String deviceDescription, GPSDB db)
         {
@@ -162,7 +166,8 @@ namespace Chetch.GPS
         {
             if (sentence != null && !sentence.Equals(""))
             {
-                sentenceLastReceived = DateTime.Now.Ticks / TimeSpan.TicksPerMillisecond;
+                long now = DateTime.Now.Ticks / TimeSpan.TicksPerMillisecond;
+                sentenceLastReceived = now;
                 lastSentenceReceived = sentence;
                 nmea.Parse(sentence);
             }
@@ -210,83 +215,68 @@ namespace Chetch.GPS
         {
 
         }
-
+        
         private void OnPositionReceived(double latitude, double longitude)
         {
+            positionsToAverage[nmea.LastSentenceType] = new GPSPositionData(latitude, longitude, currentHDOP, currentVDOP, currentPDOP, nmea.LastSentenceType);
+
             long now = DateTime.Now.Ticks / TimeSpan.TicksPerMillisecond;
-            long elapsed = currentPosition == null ? processPositionWait : now - positionLastProcessed;
-            if (currentPDOP > 10.0 * ((double)elapsed / (double)processPositionWait)) return;
-
-            GPSPositionData pos = new GPSPositionData(latitude, longitude, currentHDOP, currentVDOP, currentPDOP, nmea.LastSentenceType);
-            if (positions.Count >= MAX_POSITIONS)
+            long elapsed = now - positionLastProcessed;
+            if (elapsed < 1000)
             {
-                positions.RemoveAt(0);
+                return;
             }
-            positions.Add(pos);
-            if (positions.Count < MAX_POSITIONS) return;
 
-            if (CurrentState == State.CONNECTED)
-            {
-                CurrentState = State.RECORDING;
-                db?.SaveStatus("recording");
-                Tracing?.TraceEvent(TraceEventType.Information, 0, "Started recording");
-            }
             GPSPositionData newPos = new GPSPositionData();
-            foreach(GPSPositionData pd in positions)
+            foreach(GPSPositionData pos in positionsToAverage.Values)
             {
-                newPos.Latitude += pd.Latitude;
-                newPos.Longitude += pd.Longitude;
-                newPos.HDOP += pd.HDOP;
-                newPos.VDOP += pd.VDOP;
-                newPos.PDOP += pd.PDOP;
-                newPos.Timestamp += pd.Timestamp;
+                newPos.Latitude += pos.Latitude;
+                newPos.Longitude += pos.Longitude;
+                newPos.HDOP += pos.HDOP;
+                newPos.VDOP += pos.VDOP;
+                newPos.PDOP += pos.PDOP;
+                newPos.Timestamp += pos.Timestamp;
             }
+            newPos.Latitude /= positionsToAverage.Count;
+            newPos.Longitude /= positionsToAverage.Count;
+            newPos.HDOP /= positionsToAverage.Count;
+            newPos.VDOP /= positionsToAverage.Count;
+            newPos.PDOP /= positionsToAverage.Count;
+            newPos.Timestamp /= positionsToAverage.Count;
+            //Console.WriteLine("Average over {0} positions gives: {1}", positionsToAverage.Count, newPos.ToString());
+            positionsToAverage.Clear();
 
-            newPos.Latitude /= positions.Count;
-            newPos.Longitude /= positions.Count;
-            newPos.HDOP /= positions.Count;
-            newPos.VDOP /= positions.Count;
-            newPos.PDOP /= positions.Count;
-            newPos.Timestamp /= positions.Count;
-
-            if (currentPosition != null)
+            try
             {
-                try
+                if (now - positionLastLogged > LogPositionWait)
                 {
-                    newPos.SetMotionData(currentPosition);
-                    if (now - positionLastLogged > logPositionWait)
-                    {
-                        //add this as a new value
-                        db?.WritePosition(newPos);
-                        positionLastLogged = now;
-                    }
-                    else
-                    {
-                        //just update the same value in the database
-                        newPos.DBID = currentPosition.DBID;
-                        db?.WritePosition(newPos);
-                    }
-                    positionLastProcessed = now;
-                    currentPosition = newPos;
-                }
-                catch (Exception e)
-                {
-                    Tracing?.TraceEvent(TraceEventType.Error, 0, "OnPositionReceived: {0}", e.Message);
-                }
-            }
-            else
-            {
-                try
-                {
+                    //add this as a new value
                     db?.WritePosition(newPos);
-                    currentPosition = newPos;
-                    positionLastProcessed = now;
                     positionLastLogged = now;
                 }
-                catch (Exception e)
+                else
                 {
-                    Tracing?.TraceEvent(TraceEventType.Error, 0, "OnPositionReceived: {0}", e.Message);
+                    //just update the same value in the database
+                    newPos.DBID = currentPosition.DBID;
+                    db?.WritePosition(newPos);
                 }
+                positionLastProcessed = now;
+                currentPosition = newPos;
+
+                //keep a record of this position
+                positions.Add(currentPosition);
+                double distance = Measurement.GetDistance(positions[0].Latitude, positions[0].Longitude, currentPosition.Latitude, currentPosition.Longitude);
+                if(distance > MinDistance || positions.Count > MaxPositions)
+                {
+                    previousPosition = positions[0];
+                    positions.RemoveAt(0);
+                    currentPosition.SetMotionData(previousPosition);
+                    Console.WriteLine("Updated speed and bearing: {0}", currentPosition.ToString());
+                }
+            }
+            catch (Exception e)
+            {
+                Tracing?.TraceEvent(TraceEventType.Error, 0, "OnPositionReceived: {0}", e.Message);
             }
         }
 
