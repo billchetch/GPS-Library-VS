@@ -89,11 +89,9 @@ namespace Chetch.GPS
             }
         }
 
-        private List<GPSPositionData> positions = new List<GPSPositionData>();
         private Dictionary<String, GPSPositionData> positionsToAverage = new Dictionary<string, GPSPositionData>();
-        public int MaxPositions { get; set; } = 60; //determins maximum number of positions to avoid growing to infinity
-        public int MinDistance { get; set; } = 50; //in meteres the minimum required distance to travel in order to establish motion data
-        public List<GPSPositionData> Positions { get {  return positions;  } }
+        public int MinDistance { get; set; } = 20; //in meteres the minimum required distance to travel in order to establish motion data
+        public double PDOPThreshold { get; set; } = 3.0; //above this then start requiring an increase in distance for calculating bearing and speed
         private GPSPositionData currentPosition = null;
         public GPSPositionData CurrentPosition {  get { return currentPosition; } }
         private GPSPositionData previousPosition = null;
@@ -142,7 +140,7 @@ namespace Chetch.GPS
                 device.StartListening();
                 db?.SaveStatus("connected");
                 CurrentState = State.CONNECTED;
-                Tracing?.TraceEvent(TraceEventType.Information, 0, "Started listening to GPS data");
+                Tracing?.TraceEvent(TraceEventType.Information, 0, "Started listening for GPS data");
             } catch (Exception ex)
             {
                 db?.SaveStatus("error", ex.Message);
@@ -218,66 +216,93 @@ namespace Chetch.GPS
         
         private void OnPositionReceived(double latitude, double longitude)
         {
-            positionsToAverage[nmea.LastSentenceType] = new GPSPositionData(latitude, longitude, currentHDOP, currentVDOP, currentPDOP, nmea.LastSentenceType);
-
             long now = DateTime.Now.Ticks / TimeSpan.TicksPerMillisecond;
-            long elapsed = now - positionLastProcessed;
-            if (elapsed < 1000)
-            {
-                return;
-            }
-
-            GPSPositionData newPos = new GPSPositionData();
-            foreach(GPSPositionData pos in positionsToAverage.Values)
-            {
-                newPos.Latitude += pos.Latitude;
-                newPos.Longitude += pos.Longitude;
-                newPos.HDOP += pos.HDOP;
-                newPos.VDOP += pos.VDOP;
-                newPos.PDOP += pos.PDOP;
-                newPos.Timestamp += pos.Timestamp;
-            }
-            newPos.Latitude /= positionsToAverage.Count;
-            newPos.Longitude /= positionsToAverage.Count;
-            newPos.HDOP /= positionsToAverage.Count;
-            newPos.VDOP /= positionsToAverage.Count;
-            newPos.PDOP /= positionsToAverage.Count;
-            newPos.Timestamp /= positionsToAverage.Count;
-            //Console.WriteLine("Average over {0} positions gives: {1}", positionsToAverage.Count, newPos.ToString());
-            positionsToAverage.Clear();
-
             try
             {
-                if (now - positionLastLogged > LogPositionWait)
+                positionsToAverage[nmea.LastSentenceType] = new GPSPositionData(latitude, longitude, currentHDOP, currentVDOP, currentPDOP, nmea.LastSentenceType);
+
+                long elapsed = now - positionLastProcessed;
+                if (elapsed < 1000)
                 {
-                    //add this as a new value
-                    db?.WritePosition(newPos);
-                    positionLastLogged = now;
+                    return;
+                }
+
+                GPSPositionData newPos = new GPSPositionData();
+                foreach (GPSPositionData pos in positionsToAverage.Values)
+                {
+                    newPos.Latitude += pos.Latitude;
+                    newPos.Longitude += pos.Longitude;
+                    newPos.HDOP += pos.HDOP;
+                    newPos.VDOP += pos.VDOP;
+                    newPos.PDOP += pos.PDOP;
+                    newPos.Timestamp += pos.Timestamp;
+                }
+                newPos.Latitude /= positionsToAverage.Count;
+                newPos.Longitude /= positionsToAverage.Count;
+                newPos.HDOP /= positionsToAverage.Count;
+                newPos.VDOP /= positionsToAverage.Count;
+                newPos.PDOP /= positionsToAverage.Count;
+                newPos.Timestamp /= positionsToAverage.Count;
+                if (currentPosition != null) //use previous values, if we have moved enough then these will be updated below
+                {
+                    newPos.Speed = currentPosition.Speed;
+                    newPos.Bearing = currentPosition.Bearing;
+                    newPos.DBID = currentPosition.DBID;
+                }
+                positionsToAverage.Clear();
+
+                //set new poition as the current position
+                currentPosition = newPos;
+                positionLastProcessed = now;
+
+                //now determine previous position based on distance to set motion data
+                if (previousPosition == null)
+                {
+                    previousPosition = currentPosition;
+                    CurrentState = State.RECORDING;
+                    Tracing?.TraceEvent(TraceEventType.Information, 0, "Recording starting at " + currentPosition.ToString());
+                    db?.SaveStatus("recording");
                 }
                 else
                 {
-                    //just update the same value in the database
-                    newPos.DBID = currentPosition.DBID;
-                    db?.WritePosition(newPos);
-                }
-                positionLastProcessed = now;
-                currentPosition = newPos;
+                    double distance = Measurement.GetDistance(previousPosition.Latitude, previousPosition.Longitude, currentPosition.Latitude, currentPosition.Longitude);
+                    if ((PDOPThreshold * distance / Math.Max(currentPDOP, PDOPThreshold)) > MinDistance)
+                    {
+                        currentPosition.SetMotionData(previousPosition);
+                        previousPosition = currentPosition;
 
-                //keep a record of this position
-                positions.Add(currentPosition);
-                double distance = Measurement.GetDistance(positions[0].Latitude, positions[0].Longitude, currentPosition.Latitude, currentPosition.Longitude);
-                if(distance > MinDistance || positions.Count > MaxPositions)
-                {
-                    previousPosition = positions[0];
-                    positions.RemoveAt(0);
-                    currentPosition.SetMotionData(previousPosition);
-                    Console.WriteLine("Updated speed and bearing: {0}", currentPosition.ToString());
+                        Console.WriteLine("Distance {0} and PDOP {1} exceed {2} so we update motion data: {3}", distance, currentPDOP, MinDistance, currentPosition.ToString());
+                    }
                 }
-            }
-            catch (Exception e)
+            } catch (Exception e)
             {
                 Tracing?.TraceEvent(TraceEventType.Error, 0, "OnPositionReceived: {0}", e.Message);
+                return;
             }
+
+            //here we log to database
+            if (db != null)
+            {
+                try
+                {
+                    if (now - positionLastLogged > LogPositionWait)
+                    {
+                        //add this as a new value
+                        currentPosition.DBID = 0;
+                        db.WritePosition(currentPosition);
+                        positionLastLogged = now;
+                    }
+                    else
+                    {
+                        //just update the same value in the database
+                        db.WritePosition(currentPosition);
+                    }
+                }
+                catch (Exception e)
+                {
+                    Tracing?.TraceEvent(TraceEventType.Error, 0, "OnPositionReceived: loggin to db gives {0}", e.Message);
+                }
+            } //end log to db
         }
 
         private void OnSatellitesReceived(int svsInView, int[][] satellites)
