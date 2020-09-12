@@ -43,7 +43,7 @@ namespace Chetch.GPS
                 }
             }
 
-            protected override string GenerateParamString(KeyValuePair<string, object> kv)
+            protected override string GenerateParamString(KeyValuePair<string, object> kv, bool asLiterals = false)
             {
                 switch (kv.Key)
                 {
@@ -51,7 +51,7 @@ namespace Chetch.GPS
                         return String.Format("timestamp='{0}'", DB.asString(new DateTime((long)kv.Value * TimeSpan.TicksPerMillisecond)));
                         
                     default:
-                        return base.GenerateParamString(kv);
+                        return base.GenerateParamString(kv, asLiterals);
                 }
             }
 
