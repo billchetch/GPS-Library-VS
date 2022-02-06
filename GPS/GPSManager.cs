@@ -112,7 +112,7 @@ namespace Chetch.GPS
         private long positionLastLogged = 0;
         public int LogPositionWait { get; set; } = 30 * 1000; //in millis
         
-        public GPSManager(String deviceDescription, GPSDB db)
+        public GPSManager(String deviceDescription, GPSDB db = null)
         {
             device = new GPSSerialDevice(deviceDescription);
             this.db = db;
