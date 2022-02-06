@@ -316,7 +316,7 @@ namespace Chetch.GPS
                 int[] satellite = satellites[i];
                 if (satellite != null && satellite.Length == 4)
                 {
-                    //db.SaveSatelliteData(svsInView, satellite[0], satellite[1], satellite[2], satellite[3]);
+                    //db?.SaveSatelliteData(svsInView, satellite[0], satellite[1], satellite[2], satellite[3]);
                     //this.satellites.Add(new GPSSatelliteData(svsInView, satellite));
                 }
             } //end looping through satellites
