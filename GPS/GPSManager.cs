@@ -271,7 +271,7 @@ namespace Chetch.GPS
                         currentPosition.SetMotionData(previousPosition);
                         previousPosition = currentPosition;
 
-                        Console.WriteLine("Distance {0} and PDOP {1} exceed {2} so we update motion data: {3}", distance, currentPDOP, MinDistance, currentPosition.ToString());
+                        //Console.WriteLine("Distance {0} and PDOP {1} exceed {2} so we update motion data: {3}", distance, currentPDOP, MinDistance, currentPosition.ToString());
                     }
                 }
             } catch (Exception e)
