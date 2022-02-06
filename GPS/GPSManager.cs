@@ -266,7 +266,7 @@ namespace Chetch.GPS
                 else
                 {
                     double distance = Measurement.GetDistance(previousPosition.Latitude, previousPosition.Longitude, currentPosition.Latitude, currentPosition.Longitude);
-                    if ((PDOPThreshold * distance / Math.Max(currentPDOP, PDOPThreshold)) > MinDistance)
+                    if ((PDOPThreshold * distance / System.Math.Max(currentPDOP, PDOPThreshold)) > MinDistance)
                     {
                         currentPosition.SetMotionData(previousPosition);
                         previousPosition = currentPosition;

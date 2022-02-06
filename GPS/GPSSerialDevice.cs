@@ -39,7 +39,7 @@ namespace Chetch.GPS
         {
             if (disposing && (serialPort != null))
             {
-                serialPort.DataReceived += new SerialDataReceivedEventHandler(SerialPortDataReceived);
+                serialPort.DataReceived -= new SerialDataReceivedEventHandler(SerialPortDataReceived);
             }
 
             if(serialPort != null)
