@@ -106,7 +106,8 @@ namespace Chetch.GPS
         public GPSPositionData PreviousPosition { get { return previousPosition; } }
 
         private List<GPSSatelliteData> satellites = new List<GPSSatelliteData>();
-        
+        public List<GPSSatelliteData> Satellites { get { return satellites;  } }
+
         private GPSSerialDevice device;
         private GPSDB db;
         private NMEAInterpreter nmea;
