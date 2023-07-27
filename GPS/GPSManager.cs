@@ -64,9 +64,17 @@ namespace Chetch.GPS
         //TODO: record satellite data
         public class GPSSatelliteData
         {
-            public GPSSatelliteData()
-            {
+            public int PseudoRandomCode;
+            public int Elevation;
+            public int Azimuth;
+            public int SignalToNoiseRatio;
 
+            public GPSSatelliteData(int[] satellite)
+            {
+                PseudoRandomCode = satellite[0];
+                Elevation = satellite[1];
+                Azimuth = satellite[2];
+                SignalToNoiseRatio = satellite[3];
             }
         }
 
@@ -317,7 +325,7 @@ namespace Chetch.GPS
                 if (satellite != null && satellite.Length == 4)
                 {
                     //db?.SaveSatelliteData(svsInView, satellite[0], satellite[1], satellite[2], satellite[3]);
-                    //this.satellites.Add(new GPSSatelliteData(svsInView, satellite));
+                    this.satellites.Add(new GPSSatelliteData(satellite));
                 }
             } //end looping through satellites
         }
