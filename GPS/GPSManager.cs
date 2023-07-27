@@ -76,6 +76,11 @@ namespace Chetch.GPS
                 Azimuth = satellite[2];
                 SignalToNoiseRatio = satellite[3];
             }
+
+            override public String ToString()
+            {
+                return String.Format("E: {0}, A: {1}, S2N: {2}", Elevation, Azimuth, SignalToNoiseRatio);
+            }
         }
 
         public enum State
