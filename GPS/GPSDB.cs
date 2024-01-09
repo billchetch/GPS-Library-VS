@@ -24,17 +24,7 @@ namespace Chetch.GPS
                 switch (fieldName)
                 {
                     case "timestamp":
-                        if (fieldValue is DateTime)
-                        {
-                            this[fieldName] = (long)(((DateTime)fieldValue).ToLocalTime().Ticks / TimeSpan.TicksPerMillisecond);
-                        } else if(fieldValue is long)
-                        {
-                            this[fieldName] = fieldValue;
-                        } else
-                        {
-                            throw new Exception("Unrecognised fieldValue type for timestamp");
-                        }
-
+                        base.AddField(fieldName, fieldValue);
                         break;
 
                     default:
@@ -66,7 +56,7 @@ namespace Chetch.GPS
                 pos.HDOP = System.Convert.ToDouble(this["hdop"]);
                 pos.VDOP = System.Convert.ToDouble(this["vdop"]);
                 pos.PDOP = System.Convert.ToDouble(this["pdop"]);
-                pos.Timestamp = (long)this["timestamp"];
+                pos.Timestamp = GetDateTime("timestamp");
             }
         }
         

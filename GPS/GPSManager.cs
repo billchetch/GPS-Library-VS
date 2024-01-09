@@ -26,7 +26,7 @@ namespace Chetch.GPS
             public double Speed = 0;
             public double Bearing = 0; //in degrees
             String SentenceType = null;
-            public long Timestamp = 0; //in millis
+            public DateTime Timestamp;
 
             public GPSPositionData()
             {
@@ -40,12 +40,12 @@ namespace Chetch.GPS
                 VDOP = vdop;
                 PDOP = pdop;
                 SentenceType = sentenceType;
-                Timestamp = DateTime.Now.Ticks / TimeSpan.TicksPerMillisecond;
+                Timestamp = DateTime.Now;
             }
 
             public void SetMotionData(GPSPositionData previousPos)
             {
-                double elapsed = (double)(Timestamp - previousPos.Timestamp) / 1000.0;
+                double elapsed = (double)(Timestamp - previousPos.Timestamp).TotalSeconds;
                 if (elapsed <= 0) throw new Exception("Bad timestamp diference " + elapsed + "ms");
 
                 //cacculate speed
@@ -56,7 +56,7 @@ namespace Chetch.GPS
 
             public override string ToString()
             {
-                String dt = (new DateTime(Timestamp * TimeSpan.TicksPerMillisecond)).ToUniversalTime().ToString("yyyy-MM-dd HH:mm:ss UTC");
+                String dt = Timestamp.ToUniversalTime().ToString("yyyy-MM-dd HH:mm:ss UTC");
                 return String.Format("{0} Lat/Lon: {1},{2}, Heading: {3}deg @ {4}mps", dt, Latitude, Longitude, Bearing, Speed);
             }
         }
@@ -242,6 +242,7 @@ namespace Chetch.GPS
                 }
 
                 GPSPositionData newPos = new GPSPositionData();
+                long ticks = 0;
                 foreach (GPSPositionData pos in positionsToAverage.Values)
                 {
                     newPos.Latitude += pos.Latitude;
@@ -249,14 +250,14 @@ namespace Chetch.GPS
                     newPos.HDOP += pos.HDOP;
                     newPos.VDOP += pos.VDOP;
                     newPos.PDOP += pos.PDOP;
-                    newPos.Timestamp += pos.Timestamp;
+                    ticks += pos.Timestamp.Ticks;
                 }
                 newPos.Latitude /= positionsToAverage.Count;
                 newPos.Longitude /= positionsToAverage.Count;
                 newPos.HDOP /= positionsToAverage.Count;
                 newPos.VDOP /= positionsToAverage.Count;
                 newPos.PDOP /= positionsToAverage.Count;
-                newPos.Timestamp /= positionsToAverage.Count;
+                newPos.Timestamp = new DateTime(ticks/ positionsToAverage.Count);
                 if (currentPosition != null) //use previous values, if we have moved enough then these will be updated below
                 {
                     newPos.Speed = currentPosition.Speed;
